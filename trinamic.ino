@@ -293,44 +293,4 @@ void checkSerial() {
 
 void loop() {
   checkSerial();
-  /*Serial.println("Rotate right");
-  setTorque(200, 0);
-  delay(2000);
-  Serial.println("Stop");
-  setStop();
-  delay(2000);
-  Serial.println("Rotate left");
-  setTorque(-200, 0);
-  delay(2000);
-  Serial.println("Stop");
-  setStop();
-  delay(2000);*/
-
-  /*setVelocity(1000);
-  delay(2000);
-  setVelocity(0);
-  delay(2000);*/
-
-  // Switch to stop mode
-  /*Serial.println("Stop mode");
-  setStop();
-  delay(2000);*/
-  /*Serial.print("CTRL ");
-  spi_write(SPI_DEV_CTRL, 1, 0);
-  uint32_t hw_type = spi_read(SPI_DEV_CTRL, 0);
-  char hw_type_str[5];
-  hw_type_str[3] = hw_type & 0xFF;
-  hw_type_str[2] = (hw_type >> 8) & 0xFF;
-  hw_type_str[1] = (hw_type >> 16) & 0xFF;
-  hw_type_str[0] = (hw_type >> 24) & 0xFF;
-  hw_type_str[4] = 0;
-  Serial.print(String(hw_type_str) + " ");
-  for (uint8_t i = 1; i < 6; i++) {
-    spi_write(SPI_DEV_CTRL, 1, i);
-    uint32_t info = spi_read(SPI_DEV_CTRL, 0);
-    Serial.print(info, HEX);
-    Serial.print(" ");
-  }
-  Serial.println();
-  delay(100);*/
 }
