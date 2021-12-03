@@ -47,7 +47,24 @@ static const int spi_devices[] = {PIN_SPI_CS_CTRL, PIN_SPI_CS_DRV};
 
 SPIClass* spi = NULL;
 
+int16_t  tgt_torque   = 0;
+int16_t  tgt_flux     = 0;
+int16_t  tgt_velocity = 0;
+uint16_t p_torque     = 400;
+uint16_t i_torque     = 20;
+uint16_t p_flux       = 50;
+uint16_t i_flux       = 10;
+uint16_t p_velocity   = 400;
+uint16_t i_velocity   = 50;
+bool velocity_active  = false;
+bool torque_active    = false;
+
 void spi_write(int device, uint8_t reg, uint32_t value) {
+  if (device == SPI_DEV_CTRL) {
+    Serial.println("[CPU -> CTRL] " + String(reg, HEX) + ": 0x" + String(value));
+  } else {
+    Serial.println("[CPU -> DRV ] " + String(reg, HEX) + ": 0x" + String(value));
+  }
   spi->beginTransaction(SPISettings(spi_clk, MSBFIRST, SPI_MODE3));
   digitalWrite(spi_devices[device], LOW);
   spi->transfer(reg | 0x80);
@@ -59,6 +76,7 @@ void spi_write(int device, uint8_t reg, uint32_t value) {
   spi->transfer((uint8_t*) &value_be, 4);
   digitalWrite(spi_devices[device], HIGH);
   spi->endTransaction();
+  delay(1);
 }
 
 uint32_t spi_read(int device, uint8_t reg) {
@@ -87,7 +105,57 @@ void setup() {
   pinMode(PIN_SPI_CS_DRV, OUTPUT);
 
   initDriver();
+  initController(p_torque, i_torque, p_flux, i_flux, p_velocity, i_velocity);
+}
 
+void readDrv(uint8_t addr) {
+  uint32_t value = spi_read(SPI_DEV_DRV, addr);
+  Serial.println("DRV  " + String(addr, HEX) + ": " + String(value, HEX));
+}
+
+void setTorque(int16_t torque, int16_t flux) {
+  spi_write(SPI_DEV_CTRL, TMC4671_MODE_RAMP_MODE_MOTION, 1);
+  spi_write(SPI_DEV_CTRL, TMC4671_PID_TORQUE_FLUX_TARGET, (torque << 16) | flux);
+  velocity_active = false;
+  torque_active = true;
+}
+
+void setVelocity(int16_t velocity) {
+  spi_write(SPI_DEV_CTRL, TMC4671_MODE_RAMP_MODE_MOTION, 2);
+  spi_write(SPI_DEV_CTRL, TMC4671_PID_VELOCITY_TARGET, velocity);
+  velocity_active = true;
+  torque_active = false;
+}
+
+void setStop() {
+  spi_write(SPI_DEV_CTRL, TMC4671_MODE_RAMP_MODE_MOTION, 0x00000000);
+  velocity_active = false;
+  torque_active = false;
+}
+
+void setVelocityPi(uint16_t p, uint16_t i) {
+  spi_write(SPI_DEV_CTRL, TMC4671_PID_VELOCITY_P_VELOCITY_I, (p << 16) | i);
+}
+
+void setTorquePi(uint16_t p, uint16_t i) {
+  spi_write(SPI_DEV_CTRL, TMC4671_PID_TORQUE_P_TORQUE_I, (p << 16) | i);
+}
+
+void setFluxPi(uint16_t p, uint16_t i) {
+  spi_write(SPI_DEV_CTRL, TMC4671_PID_FLUX_P_FLUX_I, (p << 16) | i);
+}
+
+void initDriver() {
+  // Initialize the driver chip
+  spi_write(SPI_DEV_DRV, TMC6100_GCONF,
+    (0 << TMC6100_DISABLE_SHIFT)      | // Enable
+    (0 << TMC6100_SINGLELINE_SHIFT)   | // Use individual L+H signals
+    (1 << TMC6100_FAULTDIRECT_SHIFT)  | // Fault output shows each protective action
+    (1 << TMC6100_CURRENT_ZERO_SHIFT)   // Disable current amplifier
+  );
+}
+
+void initController(uint16_t torqueP, uint16_t torqueI, uint16_t fluxP, uint16_t fluxI, uint16_t velocityP, uint16_t velocityI) {
   // Motor type &  PWM configuration
   spi_write(SPI_DEV_CTRL, TMC4671_MOTOR_TYPE_N_POLE_PAIRS, 0x00030008);
   spi_write(SPI_DEV_CTRL, TMC4671_PWM_POLARITIES, 0x00000000);
@@ -118,9 +186,9 @@ void setup() {
   spi_write(SPI_DEV_CTRL, TMC4671_PID_TORQUE_FLUX_LIMITS, 2000);
   
   // PI settings
-  spi_write(SPI_DEV_CTRL, TMC4671_PID_TORQUE_P_TORQUE_I, (400 << 16) | 20);
-  spi_write(SPI_DEV_CTRL, TMC4671_PID_FLUX_P_FLUX_I, (50 << 16) | 10);
-  spi_write(SPI_DEV_CTRL, TMC4671_PID_VELOCITY_P_VELOCITY_I, (400 << 16) | 50);
+  setTorquePi(torqueP, torqueI);
+  setFluxPi(fluxP, fluxI);
+  setVelocityPi(velocityP, velocityI);
 
   // Init encoder (mode 0)
   spi_write(SPI_DEV_CTRL, TMC4671_MODE_RAMP_MODE_MOTION, 0x00000008);
@@ -137,50 +205,13 @@ void setup() {
   spi_write(SPI_DEV_CTRL, TMC4671_VELOCITY_SELECTION, 5);
 
   // Stop mode
-  spi_write(SPI_DEV_CTRL, TMC4671_MODE_RAMP_MODE_MOTION, 0x00000000);
-}
-
-void readDrv(uint8_t addr) {
-  uint32_t value = spi_read(SPI_DEV_DRV, addr);
-  Serial.println("DRV  " + String(addr, HEX) + ": " + String(value, HEX));
-}
-
-void setTorque(int16_t torque, int16_t flux) {
-  spi_write(SPI_DEV_CTRL, TMC4671_MODE_RAMP_MODE_MOTION, 1);
-  spi_write(SPI_DEV_CTRL, TMC4671_PID_TORQUE_FLUX_TARGET, (torque << 16) | flux);
-}
-
-void setVelocity(int16_t velocity) {
-  spi_write(SPI_DEV_CTRL, TMC4671_MODE_RAMP_MODE_MOTION, 2);
-  spi_write(SPI_DEV_CTRL, TMC4671_PID_VELOCITY_TARGET, velocity);
-}
-
-void setStop() {
-  spi_write(SPI_DEV_CTRL, TMC4671_MODE_RAMP_MODE_MOTION, 0x00000000);
-}
-
-void setVelocityPi(uint16_t p, uint16_t i) {
-  spi_write(SPI_DEV_CTRL, TMC4671_PID_VELOCITY_P_VELOCITY_I, (p << 16) | i);
-}
-
-void initDriver() {
-  // Initialize the driver chip
-  spi_write(SPI_DEV_DRV, TMC6100_GCONF,
-    (0 << TMC6100_DISABLE_SHIFT)      | // Enable
-    (0 << TMC6100_SINGLELINE_SHIFT)   | // Use individual L+H signals
-    (1 << TMC6100_FAULTDIRECT_SHIFT)  | // Fault output shows each protective action
-    (1 << TMC6100_CURRENT_ZERO_SHIFT)   // Disable current amplifier
-  );
+  setStop();
 }
 
 String serialInput = "";
 
-int16_t  t = 0;
-int16_t  f = 0;
-
-int16_t  v = 0;
-uint16_t p = 600; // Velocity P
-uint16_t i = 100; // Velocity I
+uint16_t p = 400; // Velocity P
+uint16_t i = 50; // Velocity I
 
 void parseSerial() {
   if (serialInput.length() < 1) return;
@@ -189,29 +220,60 @@ void parseSerial() {
   switch(c) {
     case 'r':
       initDriver();
+      initController(p_torque, i_torque, p_flux, i_flux, p_velocity, i_velocity);
       break;
     case 'v':
-      v = serialInput.toInt();
-      setVelocity(v);
+      tgt_velocity = serialInput.toInt();
+      setVelocity(tgt_velocity);
       break;
     case 't':
-      t = serialInput.toInt();
-      setTorque(t, f);
+      tgt_torque = serialInput.toInt();
+      setTorque(tgt_torque, tgt_flux);
       break;
     case 'f':
-      f = serialInput.toInt();
-      setTorque(t, f);
+      tgt_flux = serialInput.toInt();
+      setTorque(tgt_torque, tgt_flux);
       break;
     case 'p':
-      p = serialInput.toInt();
-      setVelocityPi(p, i);
+      p_velocity = serialInput.toInt();
+      setVelocityPi(p_velocity, i_velocity);
       break;
     case 'i':
-      i = serialInput.toInt();
-      setVelocityPi(p, i);
+      i_velocity = serialInput.toInt();
+      setVelocityPi(p_velocity, i_velocity);
+      break;
+    case 'P':
+      p_torque = serialInput.toInt();
+      setTorquePi(p_torque, i_torque);
+      break;
+    case 'I':
+      i_torque = serialInput.toInt();
+      setTorquePi(p_torque, i_torque);
+      break;
+    case 'o':
+      p_flux = serialInput.toInt();
+      setFluxPi(p_flux, i_flux);
+      break;
+    case 'u':
+      i_flux = serialInput.toInt();
+      setFluxPi(p_flux, i_flux);
+      break;
+    case 's':
+      setStop();
+      break;
+    case 'l':
+      Serial.println("Torque:   P = " + String(p_torque)   + ", I = " + String(i_torque));
+      Serial.println("Flux:     P = " + String(p_flux)     + ", I = " + String(i_flux));
+      Serial.println("Velocity: P = " + String(p_velocity) + ", I = " + String(i_velocity));
       break;
   }
-  Serial.println("V = "+ String(v, DEC) + ", P = " + String(p, DEC) + ", I = " + String(i, DEC));
+  if (velocity_active) {
+    Serial.println("Velocity mode, target = " + String(tgt_velocity));
+  } else if (torque_active) {
+    Serial.println("Torque mode, target = " + String(tgt_torque) + " (flux target = " + String(tgt_flux) + ")");
+  } else {
+    Serial.println("Stop mode");
+  }
   serialInput = "";
 }
 
