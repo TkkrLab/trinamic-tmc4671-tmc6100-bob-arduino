@@ -34,11 +34,14 @@ SOFTWARE.
 #include "TMC4671_Variants.h"
 
 #define SPI_BUS_INST    VSPI
+
+#define PIN_DRV_ENA     4
 #define PIN_SPI_SCK     18
 #define PIN_SPI_MISO    19
 #define PIN_SPI_MOSI    23
 #define PIN_SPI_CS_CTRL 5
 #define PIN_SPI_CS_DRV  17
+
 #define SPI_DEV_CTRL    0
 #define SPI_DEV_DRV     1
 
@@ -99,13 +102,15 @@ void setup() {
     PIN_SPI_MOSI,
     -1
   );
+  digitalWrite(PIN_DRV_ENA, LOW);
+  pinMode(PIN_DRV_ENA, OUTPUT);
+
   digitalWrite(PIN_SPI_CS_CTRL, HIGH);
   digitalWrite(PIN_SPI_CS_DRV, HIGH);
   pinMode(PIN_SPI_CS_CTRL, OUTPUT);
   pinMode(PIN_SPI_CS_DRV, OUTPUT);
 
-  initDriver();
-  initController(p_torque, i_torque, p_flux, i_flux, p_velocity, i_velocity);
+  initHardware(p_torque, i_torque, p_flux, i_flux, p_velocity, i_velocity);
 }
 
 void readDrv(uint8_t addr) {
@@ -145,7 +150,9 @@ void setFluxPi(uint16_t p, uint16_t i) {
   spi_write(SPI_DEV_CTRL, TMC4671_PID_FLUX_P_FLUX_I, (p << 16) | i);
 }
 
-void initDriver() {
+void initHardware(uint16_t torqueP, uint16_t torqueI, uint16_t fluxP, uint16_t fluxI, uint16_t velocityP, uint16_t velocityI) {
+  digitalWrite(PIN_DRV_ENA, LOW);
+
   // Initialize the driver chip
   spi_write(SPI_DEV_DRV, TMC6100_GCONF,
     (0 << TMC6100_DISABLE_SHIFT)      | // Enable
@@ -153,9 +160,7 @@ void initDriver() {
     (1 << TMC6100_FAULTDIRECT_SHIFT)  | // Fault output shows each protective action
     (1 << TMC6100_CURRENT_ZERO_SHIFT)   // Disable current amplifier
   );
-}
 
-void initController(uint16_t torqueP, uint16_t torqueI, uint16_t fluxP, uint16_t fluxI, uint16_t velocityP, uint16_t velocityI) {
   // Motor type &  PWM configuration
   spi_write(SPI_DEV_CTRL, TMC4671_MOTOR_TYPE_N_POLE_PAIRS, 0x00030008);
   spi_write(SPI_DEV_CTRL, TMC4671_PWM_POLARITIES, 0x00000000);
@@ -206,6 +211,7 @@ void initController(uint16_t torqueP, uint16_t torqueI, uint16_t fluxP, uint16_t
 
   // Stop mode
   setStop();
+  digitalWrite(PIN_DRV_ENA, HIGH);
 }
 
 String serialInput = "";
@@ -219,8 +225,7 @@ void parseSerial() {
   serialInput.remove(0,1);
   switch(c) {
     case 'r':
-      initDriver();
-      initController(p_torque, i_torque, p_flux, i_flux, p_velocity, i_velocity);
+      initHardware(p_torque, i_torque, p_flux, i_flux, p_velocity, i_velocity);
       break;
     case 'v':
       tgt_velocity = serialInput.toInt();
